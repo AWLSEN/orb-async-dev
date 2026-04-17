@@ -9,8 +9,10 @@ export interface OrbTomlInput {
   computerName: string;
   sourceGit: string;
   sourceBranch: string;
-  runtime: string;
-  disk: string;
+  /** Runtime memory in megabytes — matches docs.orbcloud.dev [resources] runtime_mb. */
+  runtimeMb: number;
+  /** Disk in megabytes — matches [resources] disk_mb. */
+  diskMb: number;
   /** Port the webhook receiver listens on inside the Orb computer. */
   port: number;
   llm: {
@@ -26,15 +28,15 @@ export interface OrbTomlInput {
 }
 
 export interface DetectedDefaults {
-  runtime: string;
-  disk: string;
+  runtimeMb: number;
+  diskMb: number;
   port: number;
   sourceBranch: string;
 }
 
 export const DEFAULT_RESOURCES: DetectedDefaults = {
-  runtime: "2GB",
-  disk: "10GB",
+  runtimeMb: 2048,
+  diskMb: 10240,
   port: 8000,
   sourceBranch: "main",
 };
@@ -88,8 +90,8 @@ model    = "${tomlEscape(input.llm.model)}"
 expose = [${input.port}]
 
 [resources]
-runtime = "${tomlEscape(input.runtime)}"
-disk    = "${tomlEscape(input.disk)}"
+runtime_mb = ${input.runtimeMb}
+disk_mb    = ${input.diskMb}
 
 [agent.env]
 ${envLines}${envLines && secretLines ? "\n" : ""}${secretLines}
@@ -104,10 +106,10 @@ export function requiredSecrets(llmSecretName: OrbTomlInput["llm"]["secretName"]
 /** Construct an OrbTomlInput from environment variables with sensible defaults. */
 export function fromEnv(env: Record<string, string | undefined>): OrbTomlInput {
   const computerName = env.ORB_COMPUTER_NAME?.trim() || "orb-async-dev";
-  const sourceGit = env.ORB_SOURCE_GIT?.trim() || "https://github.com/nextbysam/orb-async-dev";
+  const sourceGit = env.ORB_SOURCE_GIT?.trim() || "https://github.com/AWLSEN/orb-async-dev";
   const sourceBranch = env.ORB_SOURCE_BRANCH?.trim() || DEFAULT_RESOURCES.sourceBranch;
-  const runtime = env.ORB_RUNTIME?.trim() || DEFAULT_RESOURCES.runtime;
-  const disk = env.ORB_DISK?.trim() || DEFAULT_RESOURCES.disk;
+  const runtimeMb = env.ORB_RUNTIME_MB ? Number.parseInt(env.ORB_RUNTIME_MB, 10) : DEFAULT_RESOURCES.runtimeMb;
+  const diskMb = env.ORB_DISK_MB ? Number.parseInt(env.ORB_DISK_MB, 10) : DEFAULT_RESOURCES.diskMb;
   const port = env.ORB_PORT ? Number.parseInt(env.ORB_PORT, 10) : DEFAULT_RESOURCES.port;
 
   const baseUrl = env.ANTHROPIC_BASE_URL?.trim() || "https://api.anthropic.com";
@@ -122,8 +124,8 @@ export function fromEnv(env: Record<string, string | undefined>): OrbTomlInput {
     computerName,
     sourceGit,
     sourceBranch,
-    runtime,
-    disk,
+    runtimeMb,
+    diskMb,
     port,
     llm: { baseUrl, model, secretName },
     env: {

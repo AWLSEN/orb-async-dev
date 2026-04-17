@@ -13,13 +13,13 @@ describe("tomlEscape", () => {
 describe("renderOrbToml", () => {
   const base = {
     computerName: "orb-async-dev",
-    sourceGit: "https://github.com/nextbysam/orb-async-dev",
+    sourceGit: "https://github.com/AWLSEN/orb-async-dev",
     sourceBranch: "main",
-    runtime: "2GB",
-    disk: "10GB",
+    runtimeMb: 2048,
+    diskMb: 10240,
     port: 8000,
     llm: { baseUrl: "https://api.anthropic.com", model: "claude-opus-4-7", secretName: "ANTHROPIC_API_KEY" as const },
-    env: { NODE_ENV: "production", GITHUB_REPO: "nextbysam/demo" },
+    env: { NODE_ENV: "production", GITHUB_REPO: "AWLSEN/orb-async-dev-demo" },
     secrets: ["ANTHROPIC_API_KEY", "GITHUB_TOKEN", "WEBHOOK_SECRET"],
   };
 
@@ -36,7 +36,7 @@ describe("renderOrbToml", () => {
     expect(toml).toMatch(/GITHUB_TOKEN = "\$\{GITHUB_TOKEN\}"/);
     expect(toml).toMatch(/WEBHOOK_SECRET = "\$\{WEBHOOK_SECRET\}"/);
     expect(toml).toMatch(/NODE_ENV = "production"/);
-    expect(toml).toMatch(/GITHUB_REPO = "nextbysam\/demo"/);
+    expect(toml).toMatch(/GITHUB_REPO = "AWLSEN\/orb-async-dev-demo"/);
   });
 
   it("sorts env keys and secret keys for stable diffs", () => {
@@ -55,8 +55,10 @@ describe("renderOrbToml", () => {
     expect(renderOrbToml({ ...base, port: 9090 })).toMatch(/expose = \[9090\]/);
   });
 
-  it("respects runtime + disk strings verbatim", () => {
-    expect(renderOrbToml({ ...base, runtime: "4GB", disk: "20GB" })).toMatch(/runtime = "4GB"[\s\S]*disk\s*=\s*"20GB"/);
+  it("renders runtime_mb + disk_mb as integers (matches docs.orbcloud.dev)", () => {
+    const toml = renderOrbToml({ ...base, runtimeMb: 4096, diskMb: 20480 });
+    expect(toml).toMatch(/runtime_mb\s*=\s*4096/);
+    expect(toml).toMatch(/disk_mb\s*=\s*20480/);
   });
 });
 
@@ -76,8 +78,8 @@ describe("fromEnv", () => {
     const input = fromEnv({ GITHUB_REPO: "o/r" });
     expect(input.llm.secretName).toBe("ANTHROPIC_API_KEY");
     expect(input.llm.baseUrl).toBe("https://api.anthropic.com");
-    expect(input.runtime).toBe(DEFAULT_RESOURCES.runtime);
-    expect(input.disk).toBe(DEFAULT_RESOURCES.disk);
+    expect(input.runtimeMb).toBe(DEFAULT_RESOURCES.runtimeMb);
+    expect(input.diskMb).toBe(DEFAULT_RESOURCES.diskMb);
     expect(input.port).toBe(DEFAULT_RESOURCES.port);
   });
 
@@ -85,23 +87,23 @@ describe("fromEnv", () => {
     const input = fromEnv({
       GITHUB_REPO: "o/r",
       ORB_COMPUTER_NAME: "custom",
-      ORB_RUNTIME: "4GB",
-      ORB_DISK: "20GB",
+      ORB_RUNTIME_MB: "4096",
+      ORB_DISK_MB: "20480",
       ORB_PORT: "9090",
       ORB_SOURCE_BRANCH: "dev",
     });
     expect(input.computerName).toBe("custom");
-    expect(input.runtime).toBe("4GB");
-    expect(input.disk).toBe("20GB");
+    expect(input.runtimeMb).toBe(4096);
+    expect(input.diskMb).toBe(20480);
     expect(input.port).toBe(9090);
     expect(input.sourceBranch).toBe("dev");
   });
 
   it("round-trips through renderOrbToml to produce a valid TOML body", () => {
-    const input = fromEnv({ GITHUB_REPO: "nextbysam/orb-async-dev-demo" });
+    const input = fromEnv({ GITHUB_REPO: "AWLSEN/orb-async-dev-demo" });
     const toml = renderOrbToml(input);
     expect(toml).toContain('name  = "orb-async-dev"');
-    expect(toml).toContain('GITHUB_REPO = "nextbysam/orb-async-dev-demo"');
+    expect(toml).toContain('GITHUB_REPO = "AWLSEN/orb-async-dev-demo"');
     expect(toml).toContain('ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}"');
     expect(toml).toContain('GITHUB_TOKEN = "${GITHUB_TOKEN}"');
     expect(toml).toContain('WEBHOOK_SECRET = "${WEBHOOK_SECRET}"');

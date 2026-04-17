@@ -13,7 +13,7 @@
 import path from "node:path";
 import { OrbClient } from "./orb-api.ts";
 import { fromEnv, renderOrbToml } from "./orb-toml.ts";
-import { State, loadDotEnvInto, mbFromSize } from "./state.ts";
+import { State, loadDotEnvInto } from "./state.ts";
 
 const ROOT = process.cwd();
 const STATE = new State(path.join(ROOT, ".orb-state"));
@@ -60,8 +60,8 @@ async function cmdDeploy(): Promise<void> {
   await ensureApiKey(client);
 
   const input = fromEnv(process.env as Record<string, string | undefined>);
-  const runtime_mb = mbFromSize(input.runtime);
-  const disk_mb = mbFromSize(input.disk);
+  const runtime_mb = input.runtimeMb;
+  const disk_mb = input.diskMb;
 
   let computerId = await STATE.read("computer-id");
   let shortId = await STATE.read("short-id");

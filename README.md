@@ -55,7 +55,7 @@ Four questions (GH repo, GH token, LLM key, cost cap), writes `.env`, registers 
 ### Power-user path
 
 ```bash
-git clone https://github.com/nextbysam/orb-async-dev
+git clone https://github.com/AWLSEN/orb-async-dev
 cd orb-async-dev
 cp .env.example .env && $EDITOR .env
 bun install

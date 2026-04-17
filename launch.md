@@ -11,7 +11,7 @@
 >
 > Devin clone. $0/mo infra idle. MIT, self-host in 60s.
 >
-> github.com/nextbysam/orb-async-dev
+> github.com/AWLSEN/orb-async-dev
 
 **Alternate hook (shorter):**
 
@@ -20,7 +20,7 @@
 > orb-async-dev: self-hosted coding agent that wakes on webhook, runs
 > a 10-gate verifier on itself, opens a PR. $0/hr idle. MIT.
 >
-> github.com/nextbysam/orb-async-dev
+> github.com/AWLSEN/orb-async-dev
 
 ## Demo gif checklist
 
