@@ -55,6 +55,33 @@ Batch 6 — launch polish (DONE)
   [x] commit 30: flip repo visibility public + final polish
   Totals (final): 253/253 tests green, typecheck clean.
 
+Deploy to production — first live deploy (DONE)
+  Live URL:   https://99cc1574.orbcloud.dev
+  Repo:       https://github.com/AWLSEN/orb-async-dev (public)
+  Demo repo:  https://github.com/AWLSEN/orb-async-dev-demo (private)
+  Computer:   99cc1574-639d-4a4d-bf57-f2a5693a0d93 on api.orbcloud.dev
+
+  Gotchas hit + fixed (in order):
+    1. [resources] takes runtime_mb/disk_mb as ints, NOT "2GB" strings.
+    2. lang must be node|python|go|rust|binary — no "typescript".
+       Fix: lang=binary + bin/start wrapper that execs `bun run ...`.
+    3. bun curl installer needs unzip — apt-get install before.
+    4. Build runs as root (/root/.bun), agent runs as different user
+       (/home/agent). Symlinked /root/.bun/bin/bun -> /usr/local/bin.
+    5. Subsequent POST /build re-runs steps but does NOT re-clone the
+       repo. Added `git fetch + reset --hard origin/<branch>` as first
+       build step so updates actually roll.
+    6. Orb RESERVES the env var ORB_PORT for internal routing (saw
+       20198 at runtime). Renamed my env to HTTP_PORT; ORB_PORT remains
+       the local operator-side render input.
+    7. Agent stderr_tail often empty; /agent/data/orchestrator.log +
+       tee in bin/start is the reliable debug surface (readable via
+       GET /v1/computers/{id}/files/agent/data/orchestrator.log).
+
+  Smoke: /health -> 200 ok; /logs -> HTML dashboard; /github/webhook
+  without signature -> 401 missing_header; canary visible in /logs
+  after ~35s (background scheduler running).
+
 Design decisions locked in batch 1:
   - Runtime: Bun + TypeScript (fast, single binary, built-in test runner).
   - LLM: Anthropic via ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+BASE_URL proxy.
