@@ -16,6 +16,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { GithubClient } from "../adapters/github-client.ts";
 import type { TaskRequest } from "../adapters/event-router.ts";
 import { runSubAgent, type SubAgentResult } from "./sub-agent.ts";
+import { verify, renderReport, type VerifyReport } from "./verifier/index.ts";
 import { WorktreeManager } from "./worktree.ts";
 import { nodeRunner, type Runner } from "./runner.ts";
 
@@ -37,6 +38,7 @@ export interface TaskRunnerResult {
   committed: boolean;
   pushed: boolean;
   agent: SubAgentResult;
+  verify?: VerifyReport;
 }
 
 export class TaskRunner {
@@ -86,6 +88,33 @@ export class TaskRunner {
         committed = true;
         this.log(`committed on ${branch}`);
 
+        this.log(`running verifier`);
+        const verifyReport = await verify({
+          workDir: taskWt.dir,
+          baseBranch: defaultBranch,
+          taskText: task.taskText,
+          runner: this.opts.runner ?? nodeRunner,
+          anthropic: this.opts.anthropic,
+          anthropicModel: this.opts.model,
+        });
+        (this as unknown as { _verifyReport?: VerifyReport })._verifyReport = verifyReport;
+
+        if (!verifyReport.pass) {
+          const failures = verifyReport.hardFailures.map((g) => `- **${g.name}**: ${g.reason}`).join("\n");
+          this.log(`verify HARD fail (${verifyReport.hardFailures.length}) — skipping push/PR`);
+          await this.replyToSource(
+            task,
+            `I prepared a fix on branch \`${branch}\` but the pre-flight verifier blocked the PR:\n\n${failures}\n\n_No PR opened; branch was not pushed._`,
+          );
+          return {
+            branch,
+            committed,
+            pushed: false,
+            agent,
+            verify: verifyReport,
+          };
+        }
+
         await wt.run(["git", "push", "-u", "origin", branch], { cwd: taskWt.dir });
         pushed = true;
         this.log(`pushed ${branch}`);
@@ -94,13 +123,17 @@ export class TaskRunner {
           head: branch,
           base: defaultBranch,
           title: buildPullTitle(task),
-          body: buildPullBody(task, agent),
+          body: buildPullBody(task, agent, verifyReport),
         });
         pullNumber = pr.number;
         pullUrl = pr.html_url;
         this.log(`opened PR #${pr.number}: ${pr.html_url}`);
 
-        const reply = `Opened ${pr.html_url}.\n\n${agent.finalText}`;
+        const softNote =
+          verifyReport.softFailures.length > 0
+            ? `\n\n_${verifyReport.softFailures.length} soft warning(s) in the PR body._`
+            : "";
+        const reply = `Opened ${pr.html_url}.${softNote}\n\n${agent.finalText}`;
         await this.replyToSource(task, reply);
       } else {
         this.log(`agent produced no diff; posting summary only`);
@@ -116,6 +149,8 @@ export class TaskRunner {
       pushed,
       agent: agent ?? { turns: 0, finalText: "", stop_reason: "aborted", toolCalls: [] },
     };
+    const vr = (this as unknown as { _verifyReport?: VerifyReport })._verifyReport;
+    if (vr) result.verify = vr;
     if (pullNumber !== undefined) result.pullNumber = pullNumber;
     if (pullUrl !== undefined) result.pullUrl = pullUrl;
     return result;
@@ -163,12 +198,12 @@ export function buildPullTitle(task: TaskRequest): string {
   return first.length > 70 ? first.slice(0, 69) + "…" : first;
 }
 
-export function buildPullBody(task: TaskRequest, agent: SubAgentResult): string {
+export function buildPullBody(task: TaskRequest, agent: SubAgentResult, verifyReport?: VerifyReport): string {
   const ref = describeSource(task);
   const tools = agent.toolCalls.length
     ? agent.toolCalls.map((c) => `- ${c.ok ? "✓" : "✗"} \`${c.name}\`: ${c.summary}`).join("\n")
     : "- (no tool calls)";
-  return [
+  const lines = [
     `> Requested via ${ref} by @${task.author}`,
     "",
     `> ${truncate(task.rawMention, 500)}`,
@@ -176,11 +211,15 @@ export function buildPullBody(task: TaskRequest, agent: SubAgentResult): string 
     "## Summary",
     agent.finalText || "_(no summary provided)_",
     "",
+    "## Verifier",
+    verifyReport ? renderReport(verifyReport) : "_(verifier did not run)_",
+    "",
     "## Tool calls",
     tools,
     "",
     `_Stopped after ${agent.turns} turns (${agent.stop_reason}). This PR was opened by orb-async-dev._`,
-  ].join("\n");
+  ];
+  return lines.join("\n");
 }
 
 function describeSource(task: TaskRequest): string {

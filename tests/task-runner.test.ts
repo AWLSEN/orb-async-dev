@@ -101,4 +101,26 @@ describe("buildPullBody", () => {
     const review: TaskRequest = { ...task, source: { kind: "pr_review_comment", pullNumber: 42, commentId: 1 } };
     expect(buildPullBody(review, agent)).toContain("via nextbysam/demo#42 (review comment)");
   });
+
+  it("renders verifier report block when supplied", () => {
+    const body = buildPullBody(task, agent, {
+      pass: true,
+      hardFailures: [],
+      softFailures: [{ name: "lint", pass: false, reason: "3 warnings", severity: "soft" }],
+      allResults: [
+        { name: "build", pass: true, reason: "passed", severity: "hard" },
+        { name: "lint", pass: false, reason: "3 warnings", severity: "soft" },
+        { name: "tests", pass: true, reason: "passed", severity: "hard" },
+      ],
+      stoppedEarly: false,
+    });
+    expect(body).toContain("## Verifier");
+    expect(body).toContain("✓ **build** — passed");
+    expect(body).toContain("⚠ **lint** — 3 warnings");
+    expect(body).toContain("✓ **tests** — passed");
+  });
+
+  it("shows '(verifier did not run)' when no report provided", () => {
+    expect(buildPullBody(task, agent)).toContain("_(verifier did not run)_");
+  });
 });

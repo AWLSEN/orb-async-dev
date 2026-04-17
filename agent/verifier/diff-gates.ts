@@ -83,6 +83,14 @@ export const mutationGate: Gate = async (ctx): Promise<GateResult> => {
     };
   } finally {
     await restoreSrc(saved, ctx).catch(() => undefined);
+    // After worktree restore, resync the index so `git status` is clean again.
+    // Any previous `git checkout origin/base -- <path>` mutated the index; this
+    // resets it back to HEAD (which is our real commit).
+    for (const f of srcFiles) {
+      await ctx
+        .runner({ cmd: ["git", "checkout", "HEAD", "--", f.path], cwd: ctx.workDir })
+        .catch(() => undefined);
+    }
   }
 };
 

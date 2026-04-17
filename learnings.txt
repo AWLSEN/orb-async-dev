@@ -28,6 +28,16 @@ Batch 3 — orchestrator + per-task sub-agent (DONE)
   [x] commit 15: agent/task-runner.ts — webhook→PR end-to-end + wiring in orchestrator (11 tests)
   Totals: 145/145 tests green, typecheck clean.
 
+Batch 4 — 9-gate verifier (DONE)
+  [x] commit 16: agent/verifier/stack-detect.ts — bun/pnpm/yarn/npm/python/go/rust (8 tests)
+  [x] commit 17: agent/verifier/types + shell-gates — build/test/lint/typecheck/scope (13 tests)
+  [x] commit 18: agent/verifier/diff-gates — new_tests + mutation check (9 tests)
+  [x] commit 19: agent/verifier/llm-gates — self_review + red_team (Claude-backed, 12 tests)
+  [x] commit 20: agent/verifier/secret-gate + index + TaskRunner integration (19 tests)
+  Totals: 208/208 tests green, typecheck clean.
+  Verifier chain order: scope → secret_scan → new_tests → build → tests → lint → typecheck → mutation → self_review → red_team.
+  Hard failures block the PR entirely (no push, no open). Soft failures (lint) become warnings in the PR body.
+
 Design decisions locked in batch 1:
   - Runtime: Bun + TypeScript (fast, single binary, built-in test runner).
   - LLM: Anthropic via ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+BASE_URL proxy.

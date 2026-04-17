@@ -138,10 +138,18 @@ describe("mutationGate", () => {
 
   it("restores src contents after run (even on pass)", async () => {
     const runner: Runner = async (input) => {
-      if (input.cmd[0] === "git") {
-        // Simulate git checkout mutating the file on disk.
+      if (input.cmd[0] === "git" && input.cmd[1] === "checkout") {
+        const ref = input.cmd[2]!;
         const file = input.cmd[input.cmd.length - 1]!;
-        await writeFile(path.join(input.cwd, file), "BASE_VERSION");
+        // `git checkout origin/base -- <path>` reverts to base; `git checkout
+        // HEAD -- <path>` should resync to HEAD (agent's NEW_VERSION). The
+        // mutation gate's finally block issues both: first the in-memory
+        // restore writes NEW_VERSION, then the HEAD checkout confirms it.
+        if (ref.startsWith("origin/")) {
+          await writeFile(path.join(input.cwd, file), "BASE_VERSION");
+        } else if (ref === "HEAD") {
+          await writeFile(path.join(input.cwd, file), "NEW_VERSION");
+        }
         return { stdout: "", stderr: "", code: 0 };
       }
       return { stdout: "", stderr: "t", code: 1 };
