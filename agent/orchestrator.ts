@@ -12,6 +12,11 @@ import { GithubClient } from "../adapters/github-client.ts";
 import { routeEvent, type TaskRequest } from "../adapters/event-router.ts";
 import { WEBHOOK_SIGNATURE_HEADER, verifyWebhook } from "../adapters/webhook-verify.ts";
 import { TaskRunner } from "./task-runner.ts";
+import { createScheduler } from "./health/scheduler.ts";
+import { runCanaryAndNotify } from "./health/canary.ts";
+import { createCostWatchdog } from "./health/cost-watchdog.ts";
+import { createTaskRegistry, reapStuckTasks } from "./health/task-registry.ts";
+import { OrbClient } from "../deploy/orb-api.ts";
 
 export interface OrchestratorOpts {
   port?: number;
@@ -154,14 +159,19 @@ function truncate(s: string, n: number): string {
 }
 
 /** Boot an orchestrator wired to real GitHub + Anthropic clients from env.
- * Used by the `if (import.meta.main)` block; also export for CLI/tests. */
-export function createOrchestratorFromEnv(): Orchestrator {
+ * Also starts background health loops (canary hourly, cost 10min, reaper 5min).
+ */
+export function createOrchestratorFromEnv(): Orchestrator & { stopHealthLoops: () => void } {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
   const baseURL = process.env.ANTHROPIC_BASE_URL;
   const model = process.env.ANTHROPIC_MODEL ?? "claude-opus-4-7";
+  const orbApiKey = process.env.ORB_API_KEY;
+  const orbBaseUrl = process.env.ORB_BASE_URL;
+  const dailyCapUsdEnv = process.env.DAILY_COST_CAP_USD;
+  const dailyCapUsd = dailyCapUsdEnv ? Number.parseFloat(dailyCapUsdEnv) : 5;
 
   if (!token || !repo) {
     throw new Error("GITHUB_TOKEN + GITHUB_REPO required to run the orchestrator");
@@ -176,24 +186,82 @@ export function createOrchestratorFromEnv(): Orchestrator {
     ...(baseURL ? { baseURL } : {}),
   });
 
+  const registry = createTaskRegistry();
+  const scheduler = createScheduler(undefined, (name, err) =>
+    process.stderr.write(`[health:${name}] ${(err as Error).message}\n`),
+  );
+
+  // Cost watchdog (only if Orb API key is available).
+  let costWd: ReturnType<typeof createCostWatchdog> | undefined;
+  if (orbApiKey) {
+    const orb = new OrbClient(orbBaseUrl ? { apiKey: orbApiKey, baseUrl: orbBaseUrl } : { apiKey: orbApiKey });
+    costWd = createCostWatchdog({
+      orb,
+      dailyCapUsd,
+      onTrip: (s) => { process.stderr.write(`[cost-watchdog] TRIPPED at $${s.usd.toFixed(2)} >= $${dailyCapUsd}\n`); },
+    });
+    scheduler.schedule({
+      name: "cost-watchdog",
+      intervalMs: 10 * 60_000,
+      jitterMs: 60_000,
+      run: async () => {
+        await costWd!.tick();
+      },
+    });
+  }
+
   const taskRunner = new TaskRunner({
     github,
     anthropic,
     workRoot: path.join(process.cwd(), "work"),
     model,
     githubToken: token,
+    registry,
+    ...(costWd ? { isCostTripped: () => costWd!.isTripped() } : {}),
   });
 
-  return createOrchestrator({
+  // Canary (once per hour, 5min jitter).
+  scheduler.schedule({
+    name: "canary",
+    intervalMs: 60 * 60_000,
+    jitterMs: 5 * 60_000,
+    firstRunAt: Date.now() + 30_000, // wait 30s after boot so the first webhook isn't delayed
+    run: async () => {
+      await runCanaryAndNotify({
+        workRoot: path.join(process.cwd(), "work"),
+        runner: (await import("./runner.ts")).nodeRunner,
+        repoName: repo,
+        cloneUrl: `https://x-access-token:${token}@github.com/${repo}.git`,
+        defaultBranch: await github.getDefaultBranch().catch(() => "main"),
+        notify: (m) => { process.stderr.write(`[canary] ${m}\n`); },
+      });
+    },
+  });
+
+  // Stuck-task reaper (every 5min, max-age 2h).
+  scheduler.schedule({
+    name: "reaper",
+    intervalMs: 5 * 60_000,
+    run: async () => {
+      await reapStuckTasks({
+        registry,
+        maxRuntimeMs: 2 * 60 * 60_000,
+        onReap: (e, reason) => { process.stderr.write(`[reaper] cancelled ${e.id}: ${reason}\n`); },
+      });
+    },
+  });
+
+  const orch = createOrchestrator({
     github,
     onTask: (t) => {
-      // Fire and forget — orchestrator already 202'd the webhook.
       taskRunner
         .run(t)
         .then((r) => process.stderr.write(`[orchestrator] task done branch=${r.branch} pr=${r.pullNumber ?? "-"}\n`))
         .catch((e) => process.stderr.write(`[orchestrator] task error: ${(e as Error).message}\n`));
     },
   });
+
+  return { ...orch, stopHealthLoops: () => scheduler.stopAll() };
 }
 
 if (import.meta.main) {

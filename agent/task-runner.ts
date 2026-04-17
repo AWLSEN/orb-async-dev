@@ -19,6 +19,7 @@ import { runSubAgent, type SubAgentResult } from "./sub-agent.ts";
 import { verify, renderReport, type VerifyReport } from "./verifier/index.ts";
 import { WorktreeManager } from "./worktree.ts";
 import { nodeRunner, type Runner } from "./runner.ts";
+import type { TaskRegistry } from "./health/task-registry.ts";
 
 export interface TaskRunnerOpts {
   github: GithubClient;
@@ -29,6 +30,10 @@ export interface TaskRunnerOpts {
   githubToken: string;
   runner?: Runner;
   onLog?: (line: string) => void;
+  /** Optional: if provided, each task registers on start + finishes on exit. */
+  registry?: TaskRegistry;
+  /** Check before each task; if true, cost watchdog has tripped — task is rejected. */
+  isCostTripped?: () => boolean;
 }
 
 export interface TaskRunnerResult {
@@ -49,6 +54,15 @@ export class TaskRunner {
   }
 
   async run(task: TaskRequest): Promise<TaskRunnerResult> {
+    if (this.opts.isCostTripped?.()) {
+      this.log(`rejecting task — cost watchdog tripped`);
+      await this.replyToSource(
+        task,
+        "I can't start this task right now — the daily cost cap has been reached. An operator needs to acknowledge before I resume.",
+      );
+      return { branch: "", committed: false, pushed: false, agent: { turns: 0, finalText: "", stop_reason: "rejected_cost", toolCalls: [] } };
+    }
+
     const wt = new WorktreeManager({
       workRoot: this.opts.workRoot,
       runner: this.opts.runner ?? nodeRunner,
@@ -59,6 +73,16 @@ export class TaskRunner {
 
     const branch = generateBranchName(task);
     const taskWt = await wt.createTaskWorktree({ repoName: task.repo, branchName: branch, baseBranch: defaultBranch });
+
+    let cancelled = false;
+    this.opts.registry?.start({
+      id: branch,
+      startedAt: Date.now(),
+      label: `${task.repo}: ${task.taskText.slice(0, 80)}`,
+      cancel: () => {
+        cancelled = true;
+      },
+    });
 
     // Configure git author inside the worktree (commit attribution).
     await wt.run(["git", "config", "user.name", "orb-async-dev"], { cwd: taskWt.dir });
@@ -140,8 +164,10 @@ export class TaskRunner {
         await this.replyToSource(task, `Nothing to change.\n\n${agent.finalText}`);
       }
     } finally {
+      this.opts.registry?.finish(branch);
       await wt.removeTaskWorktree(task.repo, branch).catch((e) => this.log(`cleanup error: ${(e as Error).message}`));
     }
+    if (cancelled) this.log(`task ${branch} was cancelled mid-flight by reaper`);
 
     const result: TaskRunnerResult = {
       branch,

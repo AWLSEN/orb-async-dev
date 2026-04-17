@@ -38,6 +38,15 @@ Batch 4 — 9-gate verifier (DONE)
   Verifier chain order: scope → secret_scan → new_tests → build → tests → lint → typecheck → mutation → self_review → red_team.
   Hard failures block the PR entirely (no push, no open). Soft failures (lint) become warnings in the PR body.
 
+Batch 5 — health loops + cost watchdog + reaper (DONE)
+  [x] commit 21: agent/health/scheduler.ts — interval scheduler w/ jitter + injectable clock (6 tests)
+  [x] commit 22: agent/health/canary.ts — clone+status+detect+test probe + runCanaryAndNotify (7 tests)
+  [x] commit 23: agent/health/cost-watchdog.ts — /v1/usage poll + sticky trip + once-only notify (8 tests)
+  [x] commit 24: agent/health/task-registry.ts — in-memory registry + reapStuckTasks sweep (5 tests)
+  [x] commit 25: orchestrator bootstrap wires all four into scheduler (canary 1h, cost 10m, reaper 5m)
+       + TaskRunner.registry registration + isCostTripped gate rejects new tasks while tripped.
+  Totals: 235/235 tests green, typecheck clean.
+
 Design decisions locked in batch 1:
   - Runtime: Bun + TypeScript (fast, single binary, built-in test runner).
   - LLM: Anthropic via ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+BASE_URL proxy.
