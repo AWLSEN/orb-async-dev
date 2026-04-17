@@ -29,7 +29,7 @@ describe("OrbClient", () => {
         const body = (await req.json()) as { email: string };
         expect(body.email).toBe("sam@example.com");
         expect(req.headers.get("authorization")).toBeNull();
-        return new Response(JSON.stringify({ api_key: "orb_test_123" }), { status: 200 });
+        return new Response(JSON.stringify({ api_key: "orb_test_123", tenant_id: "t1" }), { status: 200 });
       },
     });
     const c = new OrbClient({ fetchImpl: fetch });
@@ -45,17 +45,21 @@ describe("OrbClient", () => {
         expect(req.headers.get("authorization")).toBe("Bearer orb_k");
         const body = (await req.json()) as { name: string; runtime_mb: number; disk_mb: number };
         expect(body).toEqual({ name: "dev", runtime_mb: 2048, disk_mb: 10240 });
-        return new Response(JSON.stringify({ id: "abcdef1234", name: "dev", runtime_mb: 2048, disk_mb: 10240 }), { status: 201 });
+        return new Response(
+          JSON.stringify({ computer_id: "abcdef1234567890", short_id: "abcd1234", name: "dev", runtime_mb: 2048, disk_mb: 10240 }),
+          { status: 201 },
+        );
       },
     });
     const c = new OrbClient({ fetchImpl: fetch, apiKey: "orb_k" });
     const comp = await c.createComputer({ name: "dev", runtime_mb: 2048, disk_mb: 10240 });
-    expect(comp.id).toBe("abcdef1234");
+    expect(comp.computer_id).toBe("abcdef1234567890");
+    expect(comp.short_id).toBe("abcd1234");
   });
 
   it("uploadConfig sends TOML content-type", async () => {
     const { fetch, calls } = stubFetch({
-      "POST /v1/computers/c1/config": () => new Response(null, { status: 204 }),
+      "POST /v1/computers/c1/config": () => new Response(null, { status: 200 }),
     });
     const c = new OrbClient({ fetchImpl: fetch, apiKey: "k" });
     await c.uploadConfig("c1", "[agent]\nname=\"x\"\n");
@@ -63,49 +67,74 @@ describe("OrbClient", () => {
     expect(calls[0]?.body).toContain("[agent]");
   });
 
-  it("startAgent omits org_secrets when empty, includes when present", async () => {
-    const seen: string[] = [];
+  it("build sends no body by default, includes org_secrets when provided", async () => {
+    const bodies: (string | null)[] = [];
+    const { fetch } = stubFetch({
+      "POST /v1/computers/c1/build": async (req) => {
+        bodies.push((await req.text()) || null);
+        return new Response(null, { status: 200 });
+      },
+    });
+    const c = new OrbClient({ fetchImpl: fetch, apiKey: "k" });
+    await c.build("c1");
+    await c.build("c1", { orgSecrets: { GITHUB_TOKEN: "ghp_x" } });
+    expect(bodies[0]).toBeNull();
+    expect(JSON.parse(bodies[1]!)).toEqual({ org_secrets: { GITHUB_TOKEN: "ghp_x" } });
+  });
+
+  it("startAgent builds body from task/count/org_secrets/orb_config", async () => {
+    const bodies: string[] = [];
     const { fetch } = stubFetch({
       "POST /v1/computers/c1/agents": async (req) => {
-        seen.push((await req.text()) || "");
-        return new Response(JSON.stringify({ id: "a1", computer_id: "c1" }), { status: 200 });
+        bodies.push(await req.text());
+        return new Response(JSON.stringify({ computer_id: "c1", port: 10000, pid: 42, state: "Running" }), { status: 201 });
       },
     });
     const c = new OrbClient({ fetchImpl: fetch, apiKey: "k" });
-    await c.startAgent("c1");
-    await c.startAgent("c1", { ANTHROPIC_API_KEY: "sk-xxx" });
-    expect(seen[0]).toBe("{}");
-    expect(JSON.parse(seen[1]!)).toEqual({ org_secrets: { ANTHROPIC_API_KEY: "sk-xxx" } });
+    const a1 = await c.startAgent("c1");
+    const a2 = await c.startAgent("c1", { orgSecrets: { ANTHROPIC_API_KEY: "sk" } });
+    const a3 = await c.startAgent("c1", { task: "fix bug", count: 2, orgSecrets: { GITHUB_TOKEN: "t" } });
+    expect(a1.port).toBe(10000);
+    expect(a1.pid).toBe(42);
+    expect(JSON.parse(bodies[0]!)).toEqual({});
+    expect(JSON.parse(bodies[1]!)).toEqual({ org_secrets: { ANTHROPIC_API_KEY: "sk" } });
+    expect(JSON.parse(bodies[2]!)).toEqual({ task: "fix bug", count: 2, org_secrets: { GITHUB_TOKEN: "t" } });
   });
 
-  it("promote + demote hit the right paths", async () => {
-    const hit: string[] = [];
+  it("promote + demote require port in body", async () => {
+    const seen: Array<{ path: string; body: string }> = [];
     const { fetch } = stubFetch({
-      "POST /v1/computers/c1/agents/promote": (r) => {
-        hit.push(new URL(r.url).pathname);
-        return new Response(null, { status: 204 });
+      "POST /v1/computers/c1/agents/promote": async (r) => {
+        seen.push({ path: new URL(r.url).pathname, body: await r.text() });
+        return new Response(null, { status: 200 });
       },
-      "POST /v1/computers/c1/agents/demote": (r) => {
-        hit.push(new URL(r.url).pathname);
-        return new Response(null, { status: 204 });
+      "POST /v1/computers/c1/agents/demote": async (r) => {
+        seen.push({ path: new URL(r.url).pathname, body: await r.text() });
+        return new Response(null, { status: 200 });
       },
     });
     const c = new OrbClient({ fetchImpl: fetch, apiKey: "k" });
-    await c.promote("c1");
-    await c.demote("c1");
-    expect(hit).toEqual(["/v1/computers/c1/agents/promote", "/v1/computers/c1/agents/demote"]);
+    await c.promote("c1", 10000);
+    await c.demote("c1", 10001);
+    expect(seen[0]).toEqual({ path: "/v1/computers/c1/agents/promote", body: '{"port":10000}' });
+    expect(seen[1]).toEqual({ path: "/v1/computers/c1/agents/demote", body: '{"port":10001}' });
   });
 
-  it("usage normalizes row-shape and array-shape responses", async () => {
-    for (const payload of [[{ period_start: "a", period_end: "b" }], { rows: [{ period_start: "a", period_end: "b" }] }]) {
-      const { fetch } = stubFetch({
-        "GET /v1/usage": () => new Response(JSON.stringify(payload), { status: 200 }),
-      });
-      const c = new OrbClient({ fetchImpl: fetch, apiKey: "k" });
-      const rows = await c.usage();
-      expect(rows.length).toBe(1);
-      expect(rows[0]?.period_start).toBe("a");
-    }
+  it("usage requires start + end query params", async () => {
+    const { fetch, calls } = stubFetch({
+      "GET /v1/usage": () => new Response(JSON.stringify({ runtime_gb_hours: 1.2, disk_gb_hours: 3.4 }), { status: 200 }),
+    });
+    const c = new OrbClient({ fetchImpl: fetch, apiKey: "k" });
+    const r = await c.usage({ start: "2026-03-01T00:00:00Z", end: "2026-03-15T23:59:59Z" });
+    expect(r.runtime_gb_hours).toBe(1.2);
+    const u = new URL(calls[0]!.url);
+    expect(u.searchParams.get("start")).toBe("2026-03-01T00:00:00Z");
+    expect(u.searchParams.get("end")).toBe("2026-03-15T23:59:59Z");
+  });
+
+  it("usage refuses missing params", async () => {
+    const c = new OrbClient({ apiKey: "k" });
+    await expect(c.usage({ start: "", end: "" })).rejects.toThrow(/start and end/);
   });
 
   it("raw throws OrbApiError on non-2xx with body text", async () => {
@@ -123,9 +152,22 @@ describe("OrbClient", () => {
     }
   });
 
-  it("liveUrl uses first-8-chars-of-id", () => {
+  it("liveUrl prefers short_id from response, falls back to id/string", () => {
     const c = new OrbClient({ apiKey: "k" });
+    expect(c.liveUrl({ short_id: "ab12cd34", name: "x", runtime_mb: 1, disk_mb: 1 })).toBe("https://ab12cd34.orbcloud.dev");
+    expect(c.liveUrl({ computer_id: "abcdef1234567890", name: "x", runtime_mb: 1, disk_mb: 1 })).toBe("https://abcdef12.orbcloud.dev");
     expect(c.liveUrl("abcdef1234567890")).toBe("https://abcdef12.orbcloud.dev");
+  });
+
+  it("listComputers + listAgents normalize array vs wrapped shapes", async () => {
+    const { fetch } = stubFetch({
+      "GET /v1/computers": () => new Response(JSON.stringify([{ name: "a", runtime_mb: 1, disk_mb: 1 }]), { status: 200 }),
+      "GET /v1/computers/c1/agents": () => new Response(JSON.stringify({ agents: [{ computer_id: "c1", port: 10000 }] }), { status: 200 }),
+    });
+    const c = new OrbClient({ fetchImpl: fetch, apiKey: "k" });
+    expect((await c.listComputers()).length).toBe(1);
+    const agents = await c.listAgents("c1");
+    expect(agents[0]?.port).toBe(10000);
   });
 
   it("refuses authed call without api_key", async () => {

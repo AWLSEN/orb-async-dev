@@ -9,25 +9,45 @@ export interface OrbClientOpts {
 }
 
 export interface Computer {
-  id: string;
+  /** Long id (UUID-shape). */
+  computer_id?: string;
+  /** Short id used to form the live URL at `https://{short_id}.orbcloud.dev`. */
+  short_id?: string;
+  /** Some older endpoints return `id` instead of `computer_id`. */
+  id?: string;
   name: string;
   runtime_mb: number;
   disk_mb: number;
   status?: string;
 }
 
+/** Response to POST /v1/computers/{id}/agents. Identity is (computer_id, port). */
 export interface Agent {
-  id: string;
   computer_id: string;
-  status?: string;
+  port: number;
+  pid?: number;
+  state?: "Running" | "Frozen" | "Checkpointed";
+  sandboxed?: boolean;
 }
 
-export interface UsageRow {
-  period_start: string;
-  period_end: string;
-  computer_id?: string;
-  gb_hours?: number;
-  cost_usd?: number;
+export interface UsageQuery {
+  /** ISO 8601 timestamp, required by the API. */
+  start: string;
+  /** ISO 8601 timestamp, required by the API. */
+  end: string;
+}
+
+export interface UsageResponse {
+  runtime_gb_hours?: number;
+  disk_gb_hours?: number;
+  /** Old shape: row list. New shape: aggregate. Client returns whichever the server sends. */
+  rows?: Array<{
+    computer_id?: string;
+    period_start?: string;
+    period_end?: string;
+    gb_hours?: number;
+    cost_usd?: number;
+  }>;
 }
 
 export class OrbApiError extends Error {
@@ -77,6 +97,12 @@ export class OrbClient {
     return (await res.json()) as Computer;
   }
 
+  async listComputers(): Promise<Computer[]> {
+    const res = await this.raw("GET", "/v1/computers");
+    const data = (await res.json()) as Computer[] | { computers?: Computer[] };
+    return Array.isArray(data) ? data : (data.computers ?? []);
+  }
+
   async getComputer(id: string): Promise<Computer> {
     const res = await this.raw("GET", `/v1/computers/${encodeURIComponent(id)}`);
     return (await res.json()) as Computer;
@@ -94,42 +120,76 @@ export class OrbClient {
   }
 
   /** Clone + install. Long-running; callers should bump the fetch timeout. */
-  async build(id: string, signal?: AbortSignal): Promise<void> {
-    await this.raw("POST", `/v1/computers/${encodeURIComponent(id)}/build`, signal ? { signal } : {});
+  async build(id: string, opts: { orgSecrets?: Record<string, string>; signal?: AbortSignal } = {}): Promise<void> {
+    const init: { headers?: Record<string, string>; body?: string; signal?: AbortSignal } = {};
+    if (opts.orgSecrets && Object.keys(opts.orgSecrets).length > 0) {
+      init.headers = { "content-type": "application/json" };
+      init.body = JSON.stringify({ org_secrets: opts.orgSecrets });
+    }
+    if (opts.signal) init.signal = opts.signal;
+    await this.raw("POST", `/v1/computers/${encodeURIComponent(id)}/build`, init);
   }
 
   // --- agents -------------------------------------------------------------
 
-  async startAgent(id: string, orgSecrets: Record<string, string> = {}): Promise<Agent> {
-    const body = Object.keys(orgSecrets).length === 0 ? "{}" : JSON.stringify({ org_secrets: orgSecrets });
+  async startAgent(
+    id: string,
+    opts: { task?: string; count?: number; orgSecrets?: Record<string, string>; orbConfig?: Record<string, unknown> } = {},
+  ): Promise<Agent> {
+    const body: Record<string, unknown> = {};
+    if (opts.task) body.task = opts.task;
+    if (opts.count !== undefined) body.count = opts.count;
+    if (opts.orgSecrets && Object.keys(opts.orgSecrets).length > 0) body.org_secrets = opts.orgSecrets;
+    if (opts.orbConfig) body.orb_config = opts.orbConfig;
     const res = await this.raw("POST", `/v1/computers/${encodeURIComponent(id)}/agents`, {
       headers: { "content-type": "application/json" },
-      body,
+      body: JSON.stringify(body),
     });
     return (await res.json()) as Agent;
   }
 
-  async promote(id: string): Promise<void> {
-    await this.raw("POST", `/v1/computers/${encodeURIComponent(id)}/agents/promote`);
+  async listAgents(id: string): Promise<Agent[]> {
+    const res = await this.raw("GET", `/v1/computers/${encodeURIComponent(id)}/agents`);
+    const data = (await res.json()) as Agent[] | { agents?: Agent[] };
+    return Array.isArray(data) ? data : (data.agents ?? []);
   }
 
-  async demote(id: string): Promise<void> {
-    await this.raw("POST", `/v1/computers/${encodeURIComponent(id)}/agents/demote`);
+  /** Wake a specific agent by its (computer, port). */
+  async promote(computerId: string, port: number): Promise<void> {
+    await this.raw("POST", `/v1/computers/${encodeURIComponent(computerId)}/agents/promote`, {
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ port }),
+    });
+  }
+
+  /** Sleep a specific agent by its (computer, port). */
+  async demote(computerId: string, port: number): Promise<void> {
+    await this.raw("POST", `/v1/computers/${encodeURIComponent(computerId)}/agents/demote`, {
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ port }),
+    });
   }
 
   // --- usage --------------------------------------------------------------
 
-  async usage(): Promise<UsageRow[]> {
-    const res = await this.raw("GET", "/v1/usage");
-    const json = (await res.json()) as UsageRow[] | { rows: UsageRow[] };
-    return Array.isArray(json) ? json : (json.rows ?? []);
+  async usage(q: UsageQuery): Promise<UsageResponse> {
+    if (!q.start || !q.end) throw new Error("usage: start and end (ISO 8601) are required");
+    const qs = `?start=${encodeURIComponent(q.start)}&end=${encodeURIComponent(q.end)}`;
+    const res = await this.raw("GET", `/v1/usage${qs}`);
+    return (await res.json()) as UsageResponse;
   }
 
   // --- helpers ------------------------------------------------------------
 
-  /** Orb exposes each computer as https://{first-8-chars-of-id}.orbcloud.dev. */
-  liveUrl(computerId: string): string {
-    return `https://${computerId.slice(0, 8)}.orbcloud.dev`;
+  /**
+   * Live URL for a computer. Prefer the server-provided short_id from the
+   * create/get response; fall back to first-8-chars-of-id for back-compat.
+   */
+  liveUrl(computer: Computer | string): string {
+    if (typeof computer === "string") return `https://${computer.slice(0, 8)}.orbcloud.dev`;
+    const shortId = computer.short_id ?? (computer.computer_id ?? computer.id ?? "").slice(0, 8);
+    if (!shortId) throw new Error("liveUrl: computer has no short_id / computer_id / id");
+    return `https://${shortId}.orbcloud.dev`;
   }
 
   private async raw(

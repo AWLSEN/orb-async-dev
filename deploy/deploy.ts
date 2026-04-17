@@ -64,12 +64,18 @@ async function cmdDeploy(): Promise<void> {
   const disk_mb = mbFromSize(input.disk);
 
   let computerId = await STATE.read("computer-id");
+  let shortId = await STATE.read("short-id");
   if (!computerId) {
     log(`creating computer ${input.computerName} (runtime=${runtime_mb}MB disk=${disk_mb}MB)`);
     const comp = await client.createComputer({ name: input.computerName, runtime_mb, disk_mb });
-    computerId = comp.id;
+    computerId = comp.computer_id ?? comp.id;
+    if (!computerId) throw new Error("create computer returned no computer_id/id");
     await STATE.write("computer-id", computerId);
-    log(`computer created: ${computerId}`);
+    if (comp.short_id) {
+      shortId = comp.short_id;
+      await STATE.write("short-id", shortId);
+    }
+    log(`computer created: ${computerId} (short=${shortId ?? "?"})`);
   } else {
     log(`reusing computer ${computerId}`);
   }
@@ -80,16 +86,23 @@ async function cmdDeploy(): Promise<void> {
   await client.uploadConfig(computerId, toml);
 
   log(`building (clone + install; this may take several minutes)`);
-  await client.build(computerId, AbortSignal.timeout(600_000));
+  const buildSecrets = process.env.GITHUB_TOKEN ? { GITHUB_TOKEN: process.env.GITHUB_TOKEN } : undefined;
+  await client.build(
+    computerId,
+    buildSecrets
+      ? { orgSecrets: buildSecrets, signal: AbortSignal.timeout(600_000) }
+      : { signal: AbortSignal.timeout(600_000) },
+  );
 
   const secrets = collectSecrets(input.secrets);
   log(`starting agent with secrets: ${Object.keys(secrets).sort().join(", ")}`);
-  const agent = await client.startAgent(computerId, secrets);
-  await STATE.write("agent-id", agent.id);
+  const agent = await client.startAgent(computerId, { orgSecrets: secrets });
+  await STATE.write("agent-port", String(agent.port));
+  if (agent.pid !== undefined) await STATE.write("agent-pid", String(agent.pid));
 
-  const liveUrl = client.liveUrl(computerId);
+  const liveUrl = client.liveUrl(shortId ? { short_id: shortId, name: "", runtime_mb: 0, disk_mb: 0 } : computerId);
   await STATE.write("live-url", liveUrl);
-  log(`deployed → ${liveUrl}`);
+  log(`deployed → ${liveUrl} (agent port=${agent.port})`);
   console.log(liveUrl);
 }
 
@@ -103,23 +116,33 @@ async function cmdStatus(): Promise<void> {
     process.exit(1);
   }
   const comp = await client.getComputer(computerId);
-  const agentId = (await STATE.read("agent-id")) ?? "(none)";
-  const liveUrl = client.liveUrl(computerId);
-  console.log(JSON.stringify({ computer: comp, agentId, liveUrl }, null, 2));
+  const agents = await client.listAgents(computerId).catch(() => []);
+  const liveUrl = client.liveUrl(comp);
+  console.log(JSON.stringify({ computer: comp, agents, liveUrl }, null, 2));
 }
 
 async function cmdPromote(): Promise<void> {
   const client = await clientWithState();
   const id = await requireComputerId();
-  await client.promote(id);
-  log(`promoted ${id}`);
+  const port = await requireAgentPort();
+  await client.promote(id, port);
+  log(`promoted ${id} port=${port}`);
 }
 
 async function cmdDemote(): Promise<void> {
   const client = await clientWithState();
   const id = await requireComputerId();
-  await client.demote(id);
-  log(`demoted ${id}`);
+  const port = await requireAgentPort();
+  await client.demote(id, port);
+  log(`demoted ${id} port=${port}`);
+}
+
+async function requireAgentPort(): Promise<number> {
+  const s = await STATE.read("agent-port");
+  if (!s) throw new Error(".orb-state/agent-port not found — run `bun run deploy` first");
+  const n = Number.parseInt(s, 10);
+  if (!Number.isFinite(n)) throw new Error(`.orb-state/agent-port invalid: ${s}`);
+  return n;
 }
 
 async function cmdDestroy(): Promise<void> {
