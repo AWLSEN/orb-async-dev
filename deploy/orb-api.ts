@@ -95,7 +95,7 @@ export class OrbClient {
 
   /** Clone + install. Long-running; callers should bump the fetch timeout. */
   async build(id: string, signal?: AbortSignal): Promise<void> {
-    await this.raw("POST", `/v1/computers/${encodeURIComponent(id)}/build`, { signal });
+    await this.raw("POST", `/v1/computers/${encodeURIComponent(id)}/build`, signal ? { signal } : {});
   }
 
   // --- agents -------------------------------------------------------------
@@ -143,12 +143,10 @@ export class OrbClient {
       if (!this.apiKey) throw new Error(`orb api: no api_key set for ${method} ${path}`);
       headers["authorization"] = `Bearer ${this.apiKey}`;
     }
-    const res = await this.fetchImpl(url, {
-      method,
-      headers,
-      body: init.body,
-      signal: init.signal,
-    });
+    const req: RequestInit = { method, headers };
+    if (init.body !== undefined) req.body = init.body;
+    if (init.signal !== undefined) req.signal = init.signal;
+    const res = await this.fetchImpl(url, req);
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new OrbApiError(res.status, url, text);

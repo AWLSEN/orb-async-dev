@@ -6,8 +6,9 @@ function stubFetch(routes: Record<string, (req: Request) => Response | Promise<R
   calls: { method: string; url: string; headers: Record<string, string>; body: string | null }[];
 } {
   const calls: { method: string; url: string; headers: Record<string, string>; body: string | null }[] = [];
-  const impl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const req = new Request(input as any, init);
+  const impl = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const target = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const req = new Request(target, init);
     const url = new URL(req.url);
     const key = `${req.method} ${url.pathname}`;
     const body = init?.body ? String(init.body) : null;
