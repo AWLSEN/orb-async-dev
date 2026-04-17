@@ -1,0 +1,19 @@
+orb-async-dev — build log
+==========================
+
+Batch 1 — scaffold + deploy to Orb (in progress)
+  [ ] commit 1: scaffold (README, LICENSE, package.json, tsconfig, .env.example, learnings.txt)
+  [ ] commit 2: deploy/orb-api.ts — wraps api.orbcloud.dev endpoints
+  [ ] commit 3: deploy/orb-toml.ts — autogenerator + template
+  [ ] commit 4: deploy/deploy.ts — end-to-end provisioning (idempotent via .orb-state/)
+  [ ] commit 5: smoke test — live {id}.orbcloud.dev/health returns 200
+
+Design decisions locked in batch 1:
+  - Runtime: Bun + TypeScript (fast, single binary, built-in test runner).
+  - LLM: Anthropic via ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+BASE_URL proxy.
+  - State: .orb-state/ stores computer-id, agent-id, api-key. Gitignored.
+  - Deploy idempotency: every step checks existing state before hitting the API.
+  - Surface: GitHub comments only for v0 (webhook → Orb URL). Telegram in v2.
+  - Verification: 9-gate chain before any PR opens (see Batch 4).
+  - Parallelism: N sub-agents per repo on git worktrees, isolated.
+  - Zero idle cost: Orb checkpoints to NVMe; wake on webhook ~1s.
