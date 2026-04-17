@@ -16,6 +16,7 @@ import { createScheduler } from "./health/scheduler.ts";
 import { runCanaryAndNotify } from "./health/canary.ts";
 import { createCostWatchdog } from "./health/cost-watchdog.ts";
 import { createTaskRegistry, reapStuckTasks } from "./health/task-registry.ts";
+import { createLogStore, renderLogsHtml, type LogStore } from "./log-store.ts";
 import { OrbClient } from "../deploy/orb-api.ts";
 
 export interface OrchestratorOpts {
@@ -28,11 +29,14 @@ export interface OrchestratorOpts {
   seen?: Set<number>;
   /** Injectable logger for tests. */
   log?: (line: string) => void;
+  /** When provided, /logs renders an HTML page of recent entries. */
+  logStore?: LogStore;
 }
 
 export interface Orchestrator {
   server: ReturnType<typeof Bun.serve>;
   seen: Set<number>;
+  logStore?: LogStore;
 }
 
 export function createOrchestrator(opts: OrchestratorOpts = {}): Orchestrator {
@@ -54,11 +58,21 @@ export function createOrchestrator(opts: OrchestratorOpts = {}): Orchestrator {
         return handleWebhook(req, { secret, seen, github: opts.github, onTask: opts.onTask, log });
       }
 
+      if (req.method === "GET" && url.pathname === "/logs") {
+        if (!opts.logStore) return new Response("logs disabled", { status: 404 });
+        return new Response(renderLogsHtml(opts.logStore), {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+        });
+      }
+
       return new Response("not found", { status: 404 });
     },
   });
 
-  return { server, seen };
+  const result: Orchestrator = { server, seen };
+  if (opts.logStore) result.logStore = opts.logStore;
+  return result;
 }
 
 async function handleWebhook(
@@ -187,9 +201,14 @@ export function createOrchestratorFromEnv(): Orchestrator & { stopHealthLoops: (
   });
 
   const registry = createTaskRegistry();
-  const scheduler = createScheduler(undefined, (name, err) =>
-    process.stderr.write(`[health:${name}] ${(err as Error).message}\n`),
-  );
+  const logStore = createLogStore(500);
+  const pushLog = (line: string): void => {
+    logStore.push(line);
+    process.stderr.write(`${line}\n`);
+  };
+  const scheduler = createScheduler(undefined, (name, err) => {
+    pushLog(`[health:${name}] ${(err as Error).message}`);
+  });
 
   // Cost watchdog (only if Orb API key is available).
   let costWd: ReturnType<typeof createCostWatchdog> | undefined;
@@ -198,7 +217,7 @@ export function createOrchestratorFromEnv(): Orchestrator & { stopHealthLoops: (
     costWd = createCostWatchdog({
       orb,
       dailyCapUsd,
-      onTrip: (s) => { process.stderr.write(`[cost-watchdog] TRIPPED at $${s.usd.toFixed(2)} >= $${dailyCapUsd}\n`); },
+      onTrip: (s) => { pushLog(`[cost-watchdog] TRIPPED at $${s.usd.toFixed(2)} >= $${dailyCapUsd}`); },
     });
     scheduler.schedule({
       name: "cost-watchdog",
@@ -233,7 +252,7 @@ export function createOrchestratorFromEnv(): Orchestrator & { stopHealthLoops: (
         repoName: repo,
         cloneUrl: `https://x-access-token:${token}@github.com/${repo}.git`,
         defaultBranch: await github.getDefaultBranch().catch(() => "main"),
-        notify: (m) => { process.stderr.write(`[canary] ${m}\n`); },
+        notify: (m) => { pushLog(`[canary] ${m}`); },
       });
     },
   });
@@ -246,18 +265,21 @@ export function createOrchestratorFromEnv(): Orchestrator & { stopHealthLoops: (
       await reapStuckTasks({
         registry,
         maxRuntimeMs: 2 * 60 * 60_000,
-        onReap: (e, reason) => { process.stderr.write(`[reaper] cancelled ${e.id}: ${reason}\n`); },
+        onReap: (e, reason) => { pushLog(`[reaper] cancelled ${e.id}: ${reason}`); },
       });
     },
   });
 
   const orch = createOrchestrator({
     github,
+    logStore,
+    log: pushLog,
     onTask: (t) => {
+      pushLog(`[orchestrator] accepted task from @${t.author} on ${t.repo}`);
       taskRunner
         .run(t)
-        .then((r) => process.stderr.write(`[orchestrator] task done branch=${r.branch} pr=${r.pullNumber ?? "-"}\n`))
-        .catch((e) => process.stderr.write(`[orchestrator] task error: ${(e as Error).message}\n`));
+        .then((r) => pushLog(`[orchestrator] task done branch=${r.branch} pr=${r.pullNumber ?? "-"}`))
+        .catch((e) => pushLog(`[orchestrator] task error: ${(e as Error).message}`));
     },
   });
 
