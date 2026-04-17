@@ -40,7 +40,9 @@ export interface Orchestrator {
 }
 
 export function createOrchestrator(opts: OrchestratorOpts = {}): Orchestrator {
-  const port = opts.port ?? Number.parseInt(process.env.ORB_PORT ?? "8000", 10);
+  // Bind to HTTP_PORT (ours), NOT ORB_PORT — Orb reserves ORB_PORT for
+  // internal routing (observed ~20198) and clobbers user values there.
+  const port = opts.port ?? Number.parseInt(process.env.HTTP_PORT ?? "8000", 10);
   const secret = opts.webhookSecret ?? process.env.WEBHOOK_SECRET ?? "";
   const seen = opts.seen ?? new Set<number>();
   const log = opts.log ?? ((line: string) => process.stderr.write(`[orchestrator] ${line}\n`));

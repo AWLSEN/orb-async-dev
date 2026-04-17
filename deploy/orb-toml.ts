@@ -145,7 +145,9 @@ export function fromEnv(env: Record<string, string | undefined>): OrbTomlInput {
       GITHUB_REPO: githubRepo,
       ANTHROPIC_BASE_URL: baseUrl,
       ANTHROPIC_MODEL: model,
-      ORB_PORT: String(port),
+      // HTTP_PORT (not ORB_PORT — Orb reserves ORB_PORT for its own
+      // internal routing and overrides user-set values).
+      HTTP_PORT: String(port),
     },
     secrets: requiredSecrets(secretName),
   };
