@@ -1,12 +1,13 @@
 orb-async-dev — build log
 ==========================
 
-Batch 1 — scaffold + deploy to Orb (in progress)
-  [ ] commit 1: scaffold (README, LICENSE, package.json, tsconfig, .env.example, learnings.txt)
-  [ ] commit 2: deploy/orb-api.ts — wraps api.orbcloud.dev endpoints
-  [ ] commit 3: deploy/orb-toml.ts — autogenerator + template
-  [ ] commit 4: deploy/deploy.ts — end-to-end provisioning (idempotent via .orb-state/)
-  [ ] commit 5: smoke test — live {id}.orbcloud.dev/health returns 200
+Batch 1 — scaffold + deploy to Orb (DONE)
+  [x] commit 1: scaffold (README, LICENSE, package.json, tsconfig, .env.example, learnings.txt)
+  [x] commit 2: deploy/orb-api.ts — wraps api.orbcloud.dev endpoints (9 tests)
+  [x] commit 3: deploy/orb-toml.ts — autogenerator + template (13 tests)
+  [x] commit 4: deploy/deploy.ts + state.ts — end-to-end idempotent provisioning (16 tests)
+  [x] commit 5: agent/orchestrator.ts + smoke.sh — /health returns 200 (4 tests)
+  Totals: 42/42 tests green, typecheck clean under strict+exactOptionalPropertyTypes.
 
 Design decisions locked in batch 1:
   - Runtime: Bun + TypeScript (fast, single binary, built-in test runner).
