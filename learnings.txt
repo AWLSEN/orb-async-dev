@@ -9,6 +9,16 @@ Batch 1 — scaffold + deploy to Orb (DONE)
   [x] commit 5: agent/orchestrator.ts + smoke.sh — /health returns 200 (4 tests)
   Totals: 42/42 tests green, typecheck clean under strict+exactOptionalPropertyTypes.
 
+Batch 2 — GitHub adapter (DONE)
+  [x] commit 6: adapters/webhook-verify.ts — HMAC-SHA256 X-Hub-Signature-256 (8 tests)
+  [x] commit 7: adapters/mention-parser.ts — @orb parser (17 tests, code-block/quote-line aware)
+  [x] commit 8: adapters/event-router.ts — issues/issue_comment/pr_review_comment (11 tests)
+  [x] commit 9: adapters/github-client.ts — default_branch, branches, PRs, comments (14 tests)
+  [x] commit 10: orchestrator /github/webhook fully wired (verify + route + dedup + ack + enqueue) (8 new orchestrator tests)
+  Totals: 100/100 tests green, typecheck clean.
+  Repo: https://github.com/nextbysam/orb-async-dev (private)
+  Demo target: https://github.com/nextbysam/orb-async-dev-demo (private, for dogfood)
+
 Design decisions locked in batch 1:
   - Runtime: Bun + TypeScript (fast, single binary, built-in test runner).
   - LLM: Anthropic via ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+BASE_URL proxy.
