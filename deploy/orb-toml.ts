@@ -78,14 +78,14 @@ git    = "${tomlEscape(input.sourceGit)}"
 branch = "${tomlEscape(input.sourceBranch)}"
 
 [build]
-# Install bun into the container (not a built-in Orb runtime), then install deps.
-# bin/start execs \`bun run agent/orchestrator.ts\` with PATH including ~/.bun/bin.
-# The curl installer needs unzip; install it first (fall back gracefully if
-# apt isn't available by chaining an || to a no-op).
+# Build runs as root (bun lands in /root/.bun/bin); the agent runs as a
+# different user (/home/agent). Install bun, symlink into /usr/local/bin so
+# it is on PATH for any user, then install deps + make bin/start executable.
 steps = [
     "(command -v unzip >/dev/null) || (apt-get update && apt-get install -y unzip) || (apk add --no-cache unzip) || true",
     "curl -fsSL https://bun.sh/install | bash",
-    "export PATH=\\"$HOME/.bun/bin:$PATH\\" && bun install --frozen-lockfile",
+    "ln -sf /root/.bun/bin/bun /usr/local/bin/bun && ln -sf /root/.bun/bin/bunx /usr/local/bin/bunx",
+    "bun install --frozen-lockfile",
     "chmod +x bin/start",
 ]
 
