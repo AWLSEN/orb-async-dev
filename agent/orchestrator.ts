@@ -6,9 +6,12 @@
 // Task execution itself lives in batch 3; for batch 2 we verify + route +
 // post an ack comment so you can see the agent receive webhooks end-to-end.
 
+import Anthropic from "@anthropic-ai/sdk";
+import path from "node:path";
 import { GithubClient } from "../adapters/github-client.ts";
 import { routeEvent, type TaskRequest } from "../adapters/event-router.ts";
 import { WEBHOOK_SIGNATURE_HEADER, verifyWebhook } from "../adapters/webhook-verify.ts";
+import { TaskRunner } from "./task-runner.ts";
 
 export interface OrchestratorOpts {
   port?: number;
@@ -150,11 +153,50 @@ function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
 
-if (import.meta.main) {
-  let github: GithubClient | undefined;
+/** Boot an orchestrator wired to real GitHub + Anthropic clients from env.
+ * Used by the `if (import.meta.main)` block; also export for CLI/tests. */
+export function createOrchestratorFromEnv(): Orchestrator {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO;
-  if (token && repo) github = new GithubClient({ token, repo });
-  const orch = createOrchestrator(github ? { github } : {});
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  const baseURL = process.env.ANTHROPIC_BASE_URL;
+  const model = process.env.ANTHROPIC_MODEL ?? "claude-opus-4-7";
+
+  if (!token || !repo) {
+    throw new Error("GITHUB_TOKEN + GITHUB_REPO required to run the orchestrator");
+  }
+  if (!apiKey && !authToken) {
+    throw new Error("ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN required");
+  }
+
+  const github = new GithubClient({ token, repo });
+  const anthropic = new Anthropic({
+    ...(authToken ? { authToken } : { apiKey: apiKey! }),
+    ...(baseURL ? { baseURL } : {}),
+  });
+
+  const taskRunner = new TaskRunner({
+    github,
+    anthropic,
+    workRoot: path.join(process.cwd(), "work"),
+    model,
+    githubToken: token,
+  });
+
+  return createOrchestrator({
+    github,
+    onTask: (t) => {
+      // Fire and forget — orchestrator already 202'd the webhook.
+      taskRunner
+        .run(t)
+        .then((r) => process.stderr.write(`[orchestrator] task done branch=${r.branch} pr=${r.pullNumber ?? "-"}\n`))
+        .catch((e) => process.stderr.write(`[orchestrator] task error: ${(e as Error).message}\n`));
+    },
+  });
+}
+
+if (import.meta.main) {
+  const orch = createOrchestratorFromEnv();
   console.error(`[orchestrator] listening on :${orch.server.port}`);
 }

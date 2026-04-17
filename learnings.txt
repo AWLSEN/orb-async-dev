@@ -19,6 +19,15 @@ Batch 2 — GitHub adapter (DONE)
   Repo: https://github.com/nextbysam/orb-async-dev (private)
   Demo target: https://github.com/nextbysam/orb-async-dev-demo (private, for dogfood)
 
+Batch 3 — orchestrator + per-task sub-agent (DONE)
+  [x] commit 11: agent/worktree.ts + agent/runner.ts — per-task git worktrees (8 tests)
+  [x] commit 12: agent/tools/fs-tools.ts — jailed read/write/edit/list/run_bash (17 tests)
+  [x] commit 13: deploy: align OrbClient + deploy.ts with current docs.orbcloud.dev
+       (fixed 3 spec bugs: promote/demote port body, usage query params, startAgent response shape)
+  [x] commit 14: agent/sub-agent.ts — Claude tool-use loop (6 tests)
+  [x] commit 15: agent/task-runner.ts — webhook→PR end-to-end + wiring in orchestrator (11 tests)
+  Totals: 145/145 tests green, typecheck clean.
+
 Design decisions locked in batch 1:
   - Runtime: Bun + TypeScript (fast, single binary, built-in test runner).
   - LLM: Anthropic via ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+BASE_URL proxy.
