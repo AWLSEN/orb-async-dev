@@ -47,6 +47,14 @@ Batch 5 — health loops + cost watchdog + reaper (DONE)
        + TaskRunner.registry registration + isCostTripped gate rejects new tasks while tripped.
   Totals: 235/235 tests green, typecheck clean.
 
+Batch 6 — launch polish (DONE)
+  [x] commit 26: cli/init.ts — npx orb-async-dev init 4-question wizard (8 tests)
+  [x] commit 27: agent/log-store.ts + /logs HTML dashboard auto-refresh (10 tests)
+  [x] commit 28: docs — pitch-first README + CLAUDE.md onboarding
+  [x] commit 29: launch.md — tweet drafts, demo gif script, post-launch backlog
+  [x] commit 30: flip repo visibility public + final polish
+  Totals (final): 253/253 tests green, typecheck clean.
+
 Design decisions locked in batch 1:
   - Runtime: Bun + TypeScript (fast, single binary, built-in test runner).
   - LLM: Anthropic via ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+BASE_URL proxy.
