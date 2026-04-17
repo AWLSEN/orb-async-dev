@@ -2,5 +2,26 @@
 # Binary-mode entry point Orb invokes. Bun is on /usr/local/bin from the
 # build step (symlinked from /root/.bun) so it works whether the agent runs
 # as root or a non-root user.
+#
+# Verbose boot diagnostics: write to both stderr AND a log file under
+# /agent/data/ so failures are visible via GET /v1/computers/{id}/files
+# even when stderr_tail is empty.
+
 set -euo pipefail
-exec bun run agent/orchestrator.ts
+
+LOG_DIR="/agent/data"
+LOG_FILE="$LOG_DIR/orchestrator.log"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+{
+  echo "=== bin/start @ $(date -u +%FT%TZ) ==="
+  echo "user:   $(whoami 2>/dev/null || echo ?)"
+  echo "pwd:    $(pwd)"
+  echo "PATH:   $PATH"
+  echo "bun:    $(command -v bun 2>/dev/null || echo MISSING)"
+  echo "bun -v: $(bun --version 2>&1 || echo BROKEN)"
+  echo "env:    $(env | grep -cE '^(GITHUB_|ANTHROPIC_|WEBHOOK_|ORB_)' 2>/dev/null) vars prefixed with our namespaces"
+  echo "=== exec orchestrator ==="
+} 2>&1 | tee -a "$LOG_FILE"
+
+exec bun run agent/orchestrator.ts 2>&1 | tee -a "$LOG_FILE"
