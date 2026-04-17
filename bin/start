@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Binary-mode entry point Orb invokes. Puts bun on PATH and execs the
+# orchestrator. Bun is installed in the build step (curl from bun.sh),
+# not shipped as an Orb runtime — keeps our stack consistent with local dev.
+set -euo pipefail
+export PATH="$HOME/.bun/bin:$PATH"
+exec bun run agent/orchestrator.ts
