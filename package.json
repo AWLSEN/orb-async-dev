@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0",
     "@octokit/rest": "^21.0.0",
     "@octokit/webhooks": "^13.0.0"
   },
