@@ -80,7 +80,10 @@ branch = "${tomlEscape(input.sourceBranch)}"
 [build]
 # Install bun into the container (not a built-in Orb runtime), then install deps.
 # bin/start execs \`bun run agent/orchestrator.ts\` with PATH including ~/.bun/bin.
+# The curl installer needs unzip; install it first (fall back gracefully if
+# apt isn't available by chaining an || to a no-op).
 steps = [
+    "(command -v unzip >/dev/null) || (apt-get update && apt-get install -y unzip) || (apk add --no-cache unzip) || true",
     "curl -fsSL https://bun.sh/install | bash",
     "export PATH=\\"$HOME/.bun/bin:$PATH\\" && bun install --frozen-lockfile",
     "chmod +x bin/start",
