@@ -81,7 +81,12 @@ branch = "${tomlEscape(input.sourceBranch)}"
 # Build runs as root (bun lands in /root/.bun/bin); the agent runs as a
 # different user (/home/agent). Install bun, symlink into /usr/local/bin so
 # it is on PATH for any user, then install deps + make bin/start executable.
+#
+# The first step (git fetch + reset) ensures re-builds pick up new commits;
+# Orb only git-clones on first build, so subsequent builds would be stale
+# without this.
 steps = [
+    "git fetch origin ${tomlEscape(input.sourceBranch)} && git reset --hard origin/${tomlEscape(input.sourceBranch)}",
     "(command -v unzip >/dev/null) || (apt-get update && apt-get install -y unzip) || (apk add --no-cache unzip) || true",
     "curl -fsSL https://bun.sh/install | bash",
     "ln -sf /root/.bun/bin/bun /usr/local/bin/bun && ln -sf /root/.bun/bin/bunx /usr/local/bin/bunx",
